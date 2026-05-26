@@ -679,12 +679,6 @@ function drawPixelFrame(img, canvas, pixelSize) {
 function animatePixelation(card, direction) {
     const img = card.querySelector('img');
     if (!img) return;
-    if (window.innerWidth < 768) {
-        // Skip canvas pixelation on mobile — just pause/resume GIF playback
-        if (direction === 'in') setPreviewPlaybackPaused(img, true);
-        else setPreviewPlaybackPaused(img, false);
-        return;
-    }
     if (direction === 'in') setPreviewPlaybackPaused(img, true);
     if (card._pixelRaf) { cancelAnimationFrame(card._pixelRaf); card._pixelRaf = null; }
     let canvas = card._pixelCanvas;
