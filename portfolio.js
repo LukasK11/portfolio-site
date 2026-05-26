@@ -283,6 +283,7 @@ async function loadApng() {
 
 async function initApngPreviewCanvas(card, img) {
     if (!isPngImage(img) || img._gifCanvasState) return;
+    if (window.innerWidth < 768) return; // skip heavy canvas decode on mobile
     try {
         const apngModule = await loadApng();
         const parseAPNG = apngModule.default || apngModule.parseAPNG;
@@ -320,6 +321,7 @@ async function initApngPreviewCanvas(card, img) {
 
 async function initGifPreviewCanvas(card, img) {
     if (!isGifImage(img) || img._gifCanvasState) return;
+    if (window.innerWidth < 768) return; // skip heavy canvas decode on mobile — native GIF is fine
     try {
         const gifuct = await loadGifuct();
         if (!gifuct || !gifuct.parseGIF || !gifuct.decompressFrames) return;
@@ -399,8 +401,6 @@ async function initGifPreviewCanvas(card, img) {
             raf: null,
         };
         img._gifCanvasState = state;
-        img.style.visibility = 'hidden';
-        syncGifCanvas(img);
 
         function drawFrame() {
             state.ctx.clearRect(0, 0, logicalW, logicalH);
@@ -424,8 +424,15 @@ async function initGifPreviewCanvas(card, img) {
             state.raf = requestAnimationFrame(animate);
         }
 
+        // Draw the first frame into the canvas, then sync its CSS position/size to the
+        // img, then hide the img and start animating — all in one rAF so the browser
+        // paints the canvas and hides the img in the same frame (no flicker).
         drawFrame();
-        state.raf = requestAnimationFrame(animate);
+        requestAnimationFrame(() => {
+            syncGifCanvas(img);
+            img.style.visibility = 'hidden';
+            state.raf = requestAnimationFrame(animate);
+        });
     } catch (e) { /* keep native GIF if decoding fails */ }
 }
 
@@ -672,6 +679,12 @@ function drawPixelFrame(img, canvas, pixelSize) {
 function animatePixelation(card, direction) {
     const img = card.querySelector('img');
     if (!img) return;
+    if (window.innerWidth < 768) {
+        // Skip canvas pixelation on mobile — just pause/resume GIF playback
+        if (direction === 'in') setPreviewPlaybackPaused(img, true);
+        else setPreviewPlaybackPaused(img, false);
+        return;
+    }
     if (direction === 'in') setPreviewPlaybackPaused(img, true);
     if (card._pixelRaf) { cancelAnimationFrame(card._pixelRaf); card._pixelRaf = null; }
     let canvas = card._pixelCanvas;
@@ -707,10 +720,16 @@ function animatePixelation(card, direction) {
 const GLITCH_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_/+-.';
 
 function glitchReveal(el, duration) {
-    const original = el.textContent;
+    // Always resolve to the canonical text, not a mid-glitch snapshot
+    if (!el._glitchOriginal) el._glitchOriginal = el.textContent;
+    const original = el._glitchOriginal;
     const len      = original.length;
-    const start    = performance.now();
+    // Cancel any in-flight animation on this element
+    el._glitchCancel = (el._glitchCancel || 0) + 1;
+    const token = el._glitchCancel;
+    const start = performance.now();
     function frame(now) {
+        if (el._glitchCancel !== token) return; // cancelled
         const progress = Math.min((now - start) / duration, 1);
         let result = '';
         for (let i = 0; i < len; i++) {
@@ -729,10 +748,14 @@ function glitchReveal(el, duration) {
 }
 
 function glitchHide(el, duration) {
-    const original = el.textContent;
+    if (!el._glitchOriginal) el._glitchOriginal = el.textContent;
+    const original = el._glitchOriginal;
     const len      = original.length;
-    const start    = performance.now();
+    el._glitchCancel = (el._glitchCancel || 0) + 1;
+    const token = el._glitchCancel;
+    const start = performance.now();
     function frame(now) {
+        if (el._glitchCancel !== token) return; // cancelled
         const progress = Math.min((now - start) / duration, 1);
         let result = '';
         for (let i = 0; i < len; i++) {
@@ -978,10 +1001,17 @@ function sizeDetailVideos(card, detail, isMobile) {
             videoDuo.style.marginLeft = (cardRect.left + 5 - detailRect.left) + 'px';
             videoDuo.style.marginRight = '';
             videoDuo.style.width = cardInnerW + 'px';
-            videoDuo.querySelectorAll('.card-video').forEach(v => {
+            const maxVidHMobile = Math.round(window.innerHeight * 0.88);
+            const videos = videoDuo.querySelectorAll('.card-video');
+            const firstAspectMobile = parseFloat(videos[0]?.dataset.aspect) || 16 / 9;
+            let firstHMobile = Math.round(cardInnerW * firstAspectMobile);
+            let sharedWMobile = cardInnerW;
+            if (firstHMobile > maxVidHMobile) { firstHMobile = maxVidHMobile; sharedWMobile = Math.round(firstHMobile / firstAspectMobile); }
+            videoDuo.style.alignItems = 'center';
+            videos.forEach(v => {
                 const aspect = parseFloat(v.dataset.aspect) || 16 / 9;
-                v.style.width = cardInnerW + 'px';
-                v.style.height = Math.round(cardInnerW * aspect) + 'px';
+                v.style.width = sharedWMobile + 'px';
+                v.style.height = Math.round(sharedWMobile * aspect) + 'px';
             });
         } else {
             const rightPad = 8;
@@ -989,10 +1019,17 @@ function sizeDetailVideos(card, detail, isMobile) {
             videoDuo.style.marginLeft = 'auto';
             videoDuo.style.marginRight = rightPad + 'px';
             videoDuo.style.width = detailW + 'px';
-            videoDuo.querySelectorAll('.card-video').forEach(v => {
+            const maxVidH = Math.round(window.innerHeight * 0.88);
+            const videos = videoDuo.querySelectorAll('.card-video');
+            const firstAspect = parseFloat(videos[0]?.dataset.aspect) || 16 / 9;
+            let firstH = Math.round(detailW * firstAspect);
+            let sharedW = detailW;
+            if (firstH > maxVidH) { firstH = maxVidH; sharedW = Math.round(firstH / firstAspect); }
+            videoDuo.style.alignItems = 'center';
+            videos.forEach(v => {
                 const aspect = parseFloat(v.dataset.aspect) || 16 / 9;
-                v.style.width = detailW + 'px';
-                v.style.height = Math.round(detailW * aspect) + 'px';
+                v.style.width = sharedW + 'px';
+                v.style.height = Math.round(sharedW * aspect) + 'px';
             });
         }
     }
@@ -1098,6 +1135,7 @@ function expandCard(card) {
     const topPad    = 28;
     const targetY   = topPad + menuBarH + topPad;
 
+
     // Freeze, snap to fixed at current position
     card.style.transition = 'none';
     img.style.transition  = 'none';
@@ -1121,7 +1159,7 @@ function expandCard(card) {
 
     if (!isVertical || isMobile) {
         const targetImgW = targetW - cardPad - 3.6;
-        const targetImgH = savedImgHpx * (targetImgW / savedImgWpx); // maintain aspect ratio
+        const targetImgH = savedImgHpx * (targetImgW / savedImgWpx); // maintain current visual aspect ratio
         img.style.width  = targetImgW + 'px';
         img.style.height = targetImgH + 'px';
         syncGifCanvas(img);
@@ -1139,7 +1177,8 @@ function expandCard(card) {
         card.style.position   = 'absolute';
         card.style.top        = absTop + 'px';
         img.style.transition  = 'none';
-        img.style.height      = 'auto';
+        img.style.height = 'auto';
+        syncGifCanvas(img);
 
         if (isMobileNow) {
             // On mobile all cards are column layout — image fills full card width
@@ -1592,7 +1631,7 @@ projectCards.forEach(card => {
             const iframe = item.querySelector('.archive-video');
             if (!iframe) return;
             const aspect = parseFloat(iframe.dataset.aspect) || 1;
-            const innerW = itemW - 10;
+            const innerW = item.clientWidth - 10; // clientWidth excludes border, so padding is symmetric
             iframe.style.width  = innerW + 'px';
             iframe.style.height = Math.round(innerW * aspect) + 'px';
         });

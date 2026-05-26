@@ -294,6 +294,33 @@ html {
     border: none;
 }
 
+.project-card[data-title="PURPLE_PAGES"] > img:not(.card-grid-img):not(.hover-img-preview),
+.project-card[data-title="PURPLE_PAGES"] .card-video {
+    border-radius: 0 0 4px 4px;
+    overflow: hidden;
+}
+
+.pp-clip-wrap {
+    display: contents;
+}
+
+.pp-clip-wrap:has(> img) {
+    display: block;
+    border-radius: 0 0 4px 4px;
+    overflow: hidden;
+    line-height: 0;
+}
+
+.pp-clip-wrap:has(> .card-video) {
+    display: block;
+    border-radius: 0 0 4px 4px;
+    overflow: hidden;
+    margin-top: 32px;
+}
+
+.pp-clip-wrap > .card-video {
+    margin-top: 0;
+}
 .card-img-grid {
     display: flex;
     flex-direction: column;
@@ -646,6 +673,13 @@ html {
     max-height: calc(50vh - 96px - 12px); /* 96px = top+bottom padding, 12px = card padding */
     max-width: min(90vw, 400px);
     object-fit: contain;
+}
+
+@media (max-width: 767px) {
+    .about-card img {
+        max-height: calc(35vh - 96px - 12px);
+        max-width: min(60vw, 220px);
+    }
 }
 
 /* Bottom half: text appears below the menu bar */
