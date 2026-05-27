@@ -589,6 +589,13 @@ projectCards.forEach(card => {
             img.src = gifSrc;
 
             img.addEventListener('load', () => {
+                const cardIsActive = card === expandedCard || card.classList.contains('expanded') || isCollapsing;
+                if (cardIsActive) {
+                    markGifPlaybackStart(img);
+                    initGifPreviewCanvas(card, img);
+                    initApngPreviewCanvas(card, img);
+                    return;
+                }
                 // Let layout recalculate naturally now that the GIF is live
                 img.style.height = 'auto';
                 markGifPlaybackStart(img);
@@ -620,8 +627,13 @@ projectCards.forEach(card => {
 
 // On resize: snap cards and images instantly so sizes and positions update atomically
 let rafPending = false;
+let lastProjectViewportWidth = window.innerWidth;
 window.addEventListener('resize', () => {
     if (rafPending) return;
+    const nextViewportWidth = window.innerWidth;
+    const widthChanged = Math.abs(nextViewportWidth - lastProjectViewportWidth) > 1;
+    if (expandedCard && nextViewportWidth < 768 && !widthChanged) return;
+    lastProjectViewportWidth = nextViewportWidth;
     rafPending = true;
     requestAnimationFrame(() => {
         // Freeze transitions for all non-expanded cards
@@ -1232,9 +1244,12 @@ function expandCard(card) {
     // Vertical on desktop: image keeps its natural size; detail fills flex row beside it
 
     // After animation settle: switch fixed→absolute, clear img height lock, show detail
-    card.addEventListener('transitionend', function onExpanded(e) {
-        if (e.propertyName !== 'left') return;
+    let expandSettled = false;
+    function finishExpand() {
+        if (expandSettled || expandedCard !== card) return;
+        expandSettled = true;
         card.removeEventListener('transitionend', onExpanded);
+        window.clearTimeout(expandFallbackTimer);
 
         const isMobileNow = window.innerWidth < 768;
         const absTop = targetY + window.scrollY;
@@ -1307,7 +1322,15 @@ function expandCard(card) {
 
             }, 450);
         }
-    });
+    }
+
+    function onExpanded(e) {
+        if (e.propertyName !== 'left') return;
+        finishExpand();
+    }
+
+    card.addEventListener('transitionend', onExpanded);
+    const expandFallbackTimer = window.setTimeout(finishExpand, PIXELATE_DURATION + 150);
 
     menuBarEl.classList.add('project-open');
     document.querySelectorAll('.corner-nav, .copyright-nav, .corner-favicon').forEach(el => el.classList.add('card-open'));
