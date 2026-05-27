@@ -321,7 +321,6 @@ async function initApngPreviewCanvas(card, img) {
 
 async function initGifPreviewCanvas(card, img) {
     if (!isGifImage(img) || img._gifCanvasState) return;
-    if (window.innerWidth < 768) return; // skip heavy canvas decode on mobile — native GIF is fine
     try {
         const gifuct = await loadGifuct();
         if (!gifuct || !gifuct.parseGIF || !gifuct.decompressFrames) return;
@@ -329,6 +328,7 @@ async function initGifPreviewCanvas(card, img) {
         const gif = gifuct.parseGIF(buffer.slice(0));
         const frames = gifuct.decompressFrames(gif, true);
         if (!frames.length) return;
+        if (img._freezeRequested || img._freezeCanvas) return;
 
         const logicalW = gif.lsd && gif.lsd.width ? gif.lsd.width : frames[0].dims.width;
         const logicalH = gif.lsd && gif.lsd.height ? gif.lsd.height : frames[0].dims.height;
@@ -458,7 +458,23 @@ const CARD_GAP = 40; // px between cards
 let dragZ = 1;
 let expandedCard = null;
 let isCollapsing = false;
+const returnNav = document.querySelector('.return-nav');
+let returnNavTimer = null;
 const collapsedState = new Map();
+
+function showReturnNavAfterMenuFade() {
+    if (!returnNav) return;
+    window.clearTimeout(returnNavTimer);
+    returnNavTimer = window.setTimeout(() => {
+        if (expandedCard && !isCollapsing) returnNav.classList.add('visible');
+    }, 500);
+}
+
+function hideReturnNav() {
+    if (!returnNav) return;
+    window.clearTimeout(returnNavTimer);
+    returnNav.classList.remove('visible');
+}
 
 function layoutProjects() {
     if (!feed) return;
@@ -470,7 +486,7 @@ function layoutProjects() {
 
     // Set image sizes in px first so offsetWidth is accurate when we measure it
     const isMobile  = vw < 768;
-    const cardImgW  = Math.round(safeW * (isMobile ? 0.5 : 0.6667));
+    const cardImgW  = Math.round(safeW * (isMobile ? 0.6 : 0.6667));
     projectCards.forEach(card => {
         if (card === expandedCard) return; // expanded card manages its own image size
         const img = card.querySelector('img');
@@ -529,6 +545,8 @@ function layoutProjects() {
         const bottomPad   = isMobile ? vh * 0.5 + 120 : 120;
         feed.style.height = (parseFloat(last.style.top) + lastH + bottomPad) + 'px';
     }
+
+    feed.classList.add('is-laid-out');
 }
 
 // Run immediately and after fonts/assets load
@@ -536,16 +554,48 @@ layoutProjects();
 document.fonts.ready.then(() => { layoutProjects(); updateMobileHoverLabel(); });
 window.addEventListener('load', () => { layoutProjects(); updateMobileHoverLabel(); });
 
-// Re-layout each time an individual image finishes loading
-// Also trigger blur-up sharpen effect
+// Each card img starts with a still JPG as src (set in HTML).
+// The GIF path is stored in data-gif. Load the GIF silently; once ready, swap src
+// and start the canvas/playback system. Layout always reads the still's dimensions
+// so nothing is ever unstable.
 projectCards.forEach(card => {
     const img = card.querySelector(':scope > img');
-    if (!img) return;
-    const sharpen = () => img.classList.add('preview-loaded');
-    if (img.complete) {
-        sharpen();
+    if (!img || !img.dataset.gif) return;
+
+    const gifSrc = img.dataset.gif;
+
+    // Re-layout once the still itself finishes loading (first paint)
+    if (!img.complete) {
+        img.addEventListener('load', () => layoutProjects(), { once: true });
+    }
+
+    // Load the GIF silently in the background
+    const gifLoader = new Image();
+    gifLoader.src = gifSrc;
+
+    const onGifReady = () => {
+        // Preserve the current CSS dimensions so the swap is invisible
+        const w = img.offsetWidth;
+        const h = img.offsetHeight;
+        if (w > 0) img.style.width  = w + 'px';
+        if (h > 0) img.style.height = h + 'px';
+
+        img.src = gifSrc;
+
+        img.addEventListener('load', () => {
+            // Let layout recalculate naturally now that the GIF is live
+            img.style.height = 'auto';
+            markGifPlaybackStart(img);
+            initGifPreviewCanvas(card, img);
+            initApngPreviewCanvas(card, img);
+            layoutProjects();
+        }, { once: true });
+    };
+
+    if (gifLoader.complete && gifLoader.naturalWidth > 0) {
+        onGifReady();
     } else {
-        img.addEventListener('load', () => { sharpen(); layoutProjects(); });
+        gifLoader.addEventListener('load', onGifReady, { once: true });
     }
 });
 
@@ -862,6 +912,7 @@ async function drawGifFrameWithGifuct(img, canvas, w, h) {
 
 function freezeCardImage(card) {
     const img = card.querySelector('img');
+    if (img) img._freezeRequested = true;
     if (img && img._gifCanvasState) {
         if (typeof img._gifCanvasState.pause === 'function') img._gifCanvasState.pause();
         else img._gifCanvasState.paused = true;
@@ -926,12 +977,14 @@ function freezeCardImage(card) {
 
 function unfreezeCardImage(card) {
     const img = card.querySelector('img');
+    if (img) img._freezeRequested = false;
     if (img && img._gifCanvasState) {
         if (typeof img._gifCanvasState.resume === 'function') img._gifCanvasState.resume();
         else img._gifCanvasState.paused = false;
         return;
     }
-    if (!img || !img._freezeCanvas) return;
+    if (!img) return;
+    if (!img._freezeCanvas) return;
     img._freezeCanvas.remove();
     img._freezeCanvas = null;
     img.style.visibility = '';
@@ -1239,7 +1292,8 @@ function expandCard(card) {
     });
 
     menuBarEl.classList.add('project-open');
-    document.querySelectorAll('.corner-nav').forEach(el => el.classList.add('card-open'));
+    document.querySelectorAll('.corner-nav, .copyright-nav, .corner-favicon').forEach(el => el.classList.add('card-open'));
+    showReturnNavAfterMenuFade();
     const title = card.dataset.title;
     const tag   = card.dataset.tag;
     activeLabel.textContent = '/' + (title || '') + '/' + (tag || '');
@@ -1250,6 +1304,7 @@ function expandCard(card) {
 function collapseCard() {
     if (!expandedCard) return;
     isCollapsing = true;
+    hideReturnNav();
     const card       = expandedCard;
     unfreezeCardImage(card);
     expandedCard     = null;
@@ -1269,7 +1324,6 @@ function collapseCard() {
         // Update menu bar in sync with the card animation start
         const menuBar = document.querySelector('.menu-bar');
         menuBar.classList.remove('project-open');
-        document.querySelectorAll('.corner-nav').forEach(el => el.classList.remove('card-open'));
         const active = document.querySelector('.menu-link.active');
         if (active) {
             activeLabel.textContent = '/' + active.dataset.page.toUpperCase();
@@ -1279,8 +1333,32 @@ function collapseCard() {
         }
         activeLabel.style.opacity = '1';
         if (nextBtn) nextBtn.textContent = '>';
+        window.setTimeout(() => {
+            if (!expandedCard && !returnNav?.classList.contains('visible')) {
+                document.querySelectorAll('.corner-nav, .copyright-nav, .corner-favicon').forEach(el => el.classList.remove('card-open'));
+            }
+        }, 500);
 
-        // Stop videos and reset inline video styles
+        // --- Step 1: freeze all transitions, measure current visual state ---
+        card.style.transition = 'none';
+        img.style.transition  = 'none';
+        const liveRect = card.getBoundingClientRect();
+        const liveImgW = img.offsetWidth;
+        const liveImgH = img.offsetHeight;
+
+        // --- Step 2: snap to fixed at exact current position (decouples from scroll) ---
+        card.style.position = 'fixed';
+        card.style.left     = liveRect.left   + 'px';
+        card.style.top      = liveRect.top    + 'px';
+        card.style.width    = liveRect.width  + 'px';
+        card.style.height   = liveRect.height + 'px'; // lock height so hiding detail won't jump
+        img.style.width     = liveImgW + 'px';
+        img.style.height    = liveImgH + 'px';
+        syncGifCanvas(img);
+        card.getBoundingClientRect(); // force reflow
+
+        // Stop videos and reset inline video styles only after the current card
+        // dimensions are locked, otherwise SCI_AM can shrink before animating down.
         if (detail) {
             detail.querySelectorAll('.card-video').forEach(v => { v.src = ''; });
             const rotateWrap = detail.querySelector('.card-video-rotate-wrap');
@@ -1313,24 +1391,6 @@ function collapseCard() {
                 });
             }
         }
-
-        // --- Step 1: freeze all transitions, measure current visual state ---
-        card.style.transition = 'none';
-        img.style.transition  = 'none';
-        const liveRect = card.getBoundingClientRect();
-        const liveImgW = img.offsetWidth;
-        const liveImgH = img.offsetHeight;
-
-        // --- Step 2: snap to fixed at exact current position (decouples from scroll) ---
-        card.style.position = 'fixed';
-        card.style.left     = liveRect.left   + 'px';
-        card.style.top      = liveRect.top    + 'px';
-        card.style.width    = liveRect.width  + 'px';
-        card.style.height   = liveRect.height + 'px'; // lock height so hiding detail won't jump
-        img.style.width     = liveImgW + 'px';
-        img.style.height    = liveImgH + 'px';
-        syncGifCanvas(img);
-        card.getBoundingClientRect(); // force reflow
 
         // --- Step 3: hide detail and restore feed height (safe — card is now fixed) ---
         if (detail) {
@@ -1436,6 +1496,12 @@ window.addEventListener('click', () => {
     if (ignoreNextWindowClick) { ignoreNextWindowClick = false; return; }
     if (expandedCard) collapseCard();
 });
+
+if (returnNav) {
+    returnNav.addEventListener('click', () => {
+        if (expandedCard) collapseCard();
+    });
+}
 
 projectCards.forEach(card => {
     let mouseDownX, mouseDownY;
@@ -1581,7 +1647,7 @@ projectCards.forEach(card => {
 
     const ITEM_W        = 300;
     const ITEM_W_MOBILE = 200; // px on mobile
-    const TOP_OFFSET    = 80;   // px from top before items start (desktop)
+    const TOP_OFFSET    = 160;  // px from top before items start (desktop)
     const COL_GAP       = 24;   // horizontal gap between columns
     const ROW_GAP       = 24;   // vertical gap between items
 
@@ -1594,6 +1660,9 @@ projectCards.forEach(card => {
         }
         return a;
     }
+
+    // Shuffle order once so it stays consistent across layout calls (resize, image load, etc.)
+    const shuffledItems = shuffle(archiveItems);
 
     function layoutArchive() {
         const vw       = window.innerWidth;
@@ -1653,9 +1722,8 @@ projectCards.forEach(card => {
             return 300; // absolute last resort
         }
 
-        // Shuffle order for visual randomness, then place into shortest column
-        const shuffled = shuffle(archiveItems);
-        shuffled.forEach(item => {
+        // Place items in the fixed shuffle order into shortest column
+        shuffledItems.forEach(item => {
             const col = colTops.indexOf(Math.min(...colTops));
             item.style.left = colXs[col] + 'px';
             item.style.top  = colTops[col] + 'px';
@@ -1663,6 +1731,7 @@ projectCards.forEach(card => {
         });
 
         archiveFeed.style.height = (Math.max(...colTops) + 60) + 'px';
+        archiveFeed.classList.add('is-laid-out');
 
         // Only autoplay the video whose item sits highest on the page
         const videoItems = archiveItems.filter(item => item.querySelector('.archive-video'));
@@ -1690,6 +1759,18 @@ projectCards.forEach(card => {
     layoutArchive();
     window.addEventListener('resize', onResize);
 
+    // Move menu bar to top on first scroll, mouse move, or touch — just like opening a card
+    const menuBar = document.querySelector('.menu-bar');
+    function activateArchiveMenu() {
+        if (menuBar) menuBar.classList.add('archive-open');
+        window.removeEventListener('scroll',     activateArchiveMenu, { passive: true });
+        window.removeEventListener('mousemove',  activateArchiveMenu);
+        window.removeEventListener('touchstart', activateArchiveMenu, { passive: true });
+    }
+    window.addEventListener('scroll',     activateArchiveMenu, { passive: true });
+    window.addEventListener('mousemove',  activateArchiveMenu);
+    window.addEventListener('touchstart', activateArchiveMenu, { passive: true });
+
     // Re-layout once each image finishes loading in case it was unloaded on first pass
     archiveItems.forEach(item => {
         const img = item.querySelector('img');
@@ -1716,9 +1797,14 @@ projectCards.forEach(card => {
 // ── About page init ────────────────────────────────────────────────────────
 (function () {
     if (document.body.dataset.page !== 'about') return;
-    const aboutText   = document.querySelector('.about-text');
-    const aboutFooter = document.querySelector('.about-footer');
-    const menuBar     = document.querySelector('.menu-bar');
+    const aboutText    = document.querySelector('.about-text');
+    const aboutFooter  = document.querySelector('.about-footer');
+    const greeting     = document.querySelector('.about-greeting');
+
+    // Glitch reveal on load
+    if (greeting) glitchReveal(greeting, 650);
+
+    const menuBar = document.querySelector('.menu-bar');
     if (!menuBar) return;
 
     function syncWidths() {
