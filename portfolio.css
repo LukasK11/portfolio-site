@@ -685,6 +685,12 @@ html {
         max-width: calc(100vw - 24px);
     }
 
+    .project-card,
+    .archive-item,
+    .about-card {
+        border: clamp(0.8px, 0.13vw, 1.8px) solid #000000;
+    }
+
     /* Vertical expanded card: stack detail below image instead of side by side */
     .project-card.expanded.vertical {
         flex-direction: column;

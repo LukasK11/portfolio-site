@@ -321,6 +321,7 @@ async function initApngPreviewCanvas(card, img) {
 
 async function initGifPreviewCanvas(card, img) {
     if (!isGifImage(img) || img._gifCanvasState) return;
+    if (window.innerWidth < 768) return; // avoid full GIF frame decompression on mobile
     try {
         const gifuct = await loadGifuct();
         if (!gifuct || !gifuct.parseGIF || !gifuct.decompressFrames) return;
@@ -563,39 +564,56 @@ projectCards.forEach(card => {
     if (!img || !img.dataset.gif) return;
 
     const gifSrc = img.dataset.gif;
+    let gifLoadStarted = false;
 
     // Re-layout once the still itself finishes loading (first paint)
     if (!img.complete) {
         img.addEventListener('load', () => layoutProjects(), { once: true });
     }
 
-    // Load the GIF silently in the background
-    const gifLoader = new Image();
-    gifLoader.src = gifSrc;
+    function loadPreviewGif() {
+        if (gifLoadStarted) return;
+        gifLoadStarted = true;
 
-    const onGifReady = () => {
-        // Preserve the current CSS dimensions so the swap is invisible
-        const w = img.offsetWidth;
-        const h = img.offsetHeight;
-        if (w > 0) img.style.width  = w + 'px';
-        if (h > 0) img.style.height = h + 'px';
+        // Load the GIF silently in the background
+        const gifLoader = new Image();
+        gifLoader.src = gifSrc;
 
-        img.src = gifSrc;
+        const onGifReady = () => {
+            // Preserve the current CSS dimensions so the swap is invisible
+            const w = img.offsetWidth;
+            const h = img.offsetHeight;
+            if (w > 0) img.style.width  = w + 'px';
+            if (h > 0) img.style.height = h + 'px';
 
-        img.addEventListener('load', () => {
-            // Let layout recalculate naturally now that the GIF is live
-            img.style.height = 'auto';
-            markGifPlaybackStart(img);
-            initGifPreviewCanvas(card, img);
-            initApngPreviewCanvas(card, img);
-            layoutProjects();
-        }, { once: true });
-    };
+            img.src = gifSrc;
 
-    if (gifLoader.complete && gifLoader.naturalWidth > 0) {
-        onGifReady();
+            img.addEventListener('load', () => {
+                // Let layout recalculate naturally now that the GIF is live
+                img.style.height = 'auto';
+                markGifPlaybackStart(img);
+                initGifPreviewCanvas(card, img);
+                initApngPreviewCanvas(card, img);
+                layoutProjects();
+            }, { once: true });
+        };
+
+        if (gifLoader.complete && gifLoader.naturalWidth > 0) {
+            onGifReady();
+        } else {
+            gifLoader.addEventListener('load', onGifReady, { once: true });
+        }
+    }
+
+    if (window.innerWidth < 768 && 'IntersectionObserver' in window) {
+        const observer = new IntersectionObserver(entries => {
+            if (!entries.some(entry => entry.isIntersecting)) return;
+            observer.disconnect();
+            loadPreviewGif();
+        }, { rootMargin: '300px 0px' });
+        observer.observe(card);
     } else {
-        gifLoader.addEventListener('load', onGifReady, { once: true });
+        loadPreviewGif();
     }
 });
 
