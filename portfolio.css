@@ -654,6 +654,37 @@ html {
         top: 12px;
     }
 
+    .return-nav {
+        top: 28px;
+        width: 2.65em;
+        height: 2.65em;
+        border-radius: 50%;
+        border: clamp(0.8px, 0.13vw, 1.8px) solid #000000;
+        background-color: rgba(255, 255, 255, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        overflow: hidden;
+        font-size: clamp(7px, 2.3vw, 10px);
+        color: transparent;
+        text-indent: -9999px;
+    }
+
+    .return-nav::before {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        margin-right: 0;
+        color: #000000;
+        text-indent: 0;
+    }
+
+    .return-nav:hover::before {
+        color: #3463FF;
+    }
+
     .corner-left,
     .return-nav,
     .copyright-nav {
