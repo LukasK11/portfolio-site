@@ -34,6 +34,7 @@ body {
     font-family: 'PP Neue Montreal Mono', monospace;
     text-transform: lowercase;
     overflow-x: clip;
+    --card-radius: 3px;
 }
 
 html {
@@ -79,6 +80,17 @@ html {
 
 .menu-bar.archive-open {
     top: 63px;
+    transform: translate(-50%, 0);
+}
+
+.menu-bar.home-lower {
+    top: calc(100vh - 28px - 2.65em);
+    transform: translate(-50%, 0);
+}
+
+.menu-bar.home-lower.home-top,
+.menu-bar.home-lower.project-open {
+    top: 28px;
     transform: translate(-50%, 0);
 }
 
@@ -220,9 +232,10 @@ html {
     display: inline-flex;
     flex-direction: column;
     border: 1.8px solid #000000;
-    border-radius: 0;
+    border-radius: var(--card-radius);
     padding: 5px;
     background: #ffffff;
+    overflow: hidden;
     position: absolute;
     z-index: 1;
     cursor: pointer;
@@ -269,6 +282,21 @@ html {
 .project-card > img:not(.card-grid-img):not(.hover-img-preview) {
     transition: width  1.1s cubic-bezier(0.76, 0, 0.24, 1),
                 height 1.1s cubic-bezier(0.76, 0, 0.24, 1);
+}
+
+.card-detail img:not(.hover-img-preview) {
+    background-color: #f4f4f4;
+    transition: filter 0.85s ease, opacity 0.85s ease;
+}
+
+.card-detail img.project-detail-image-loading:not(.hover-img-preview) {
+    filter: blur(14px);
+    opacity: 0.45;
+}
+
+.card-detail img.project-detail-image-loaded:not(.hover-img-preview) {
+    filter: blur(0);
+    opacity: 1;
 }
 
 .menu-active-area {
@@ -716,10 +744,13 @@ html {
         max-width: calc(100vw - 24px);
     }
 
-    .project-card,
-    .archive-item,
-    .about-card {
-        border: clamp(0.8px, 0.13vw, 1.8px) solid #000000;
+    .menu-bar.home-lower {
+        top: calc(100vh - 92px - 2.65em);
+    }
+
+    .menu-bar.home-lower.home-top,
+    .menu-bar.home-lower.project-open {
+        top: 63px;
     }
 
     /* Vertical expanded card: stack detail below image instead of side by side */
@@ -777,14 +808,24 @@ html {
     min-height: 100vh;
 }
 
-body[data-page="about"] {
-    display: flex;
-    flex-direction: column;
+.home-about {
+    position: relative;
     min-height: 100vh;
+    padding-bottom: 104px;
 }
 
-body[data-page="about"] .about-page {
-    flex: 1;
+.home-about.about-pixelated > :not(.about-pixel-canvas) {
+    visibility: hidden;
+}
+
+.about-pixel-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    image-rendering: pixelated;
+    z-index: 2;
 }
 
 /* Top half: portrait sits above the centred menu bar */
@@ -800,9 +841,11 @@ body[data-page="about"] .about-page {
 
 .about-card {
     border: 1.8px solid #000000;
+    border-radius: var(--card-radius);
     padding: 5px;
     background: #ffffff;
     display: inline-flex;
+    overflow: hidden;
     max-height: 100%;
     box-sizing: border-box;
 }
@@ -844,6 +887,37 @@ body[data-page="about"] .about-page {
 
 .about-text p + p {
     margin-top: 0.6em;
+}
+
+.about-scroll-arrow {
+    width: 24px;
+    height: var(--about-arrow-height, 80px);
+    margin-top: 24px;
+    color: #3463FF;
+    flex: 0 0 auto;
+    opacity: 1;
+    transition: opacity 0.45s ease;
+}
+
+.about-scroll-arrow.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.about-scroll-arrow svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.about-scroll-arrow path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
 }
 
 .about-greeting {
@@ -907,8 +981,10 @@ body[data-page="about"] .about-page {
     position: absolute;
     width: 400px;
     border: 1.8px solid #000000;
+    border-radius: var(--card-radius);
     padding: 5px;
     background: #ffffff;
+    overflow: hidden;
     box-sizing: border-box;
     cursor: default;
     display: block;
@@ -964,8 +1040,24 @@ body[data-page="about"] .about-page {
     animation: flash 1.2s ease-in-out infinite;
 }
 
+.home-about-footer {
+    position: static;
+    padding: 96px 0 20px;
+    box-sizing: border-box;
+}
+
 @media (max-width: 767px) {
     .about-footer-link {
         font-size: 6.5pt;
+    }
+
+    .home-about-footer {
+        padding: 72px 0 14px;
+    }
+
+    .project-card,
+    .archive-item,
+    .about-card {
+        border: clamp(0.8px, 0.13vw, 1.8px) solid #000000;
     }
 }

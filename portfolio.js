@@ -140,7 +140,7 @@ links.forEach(link => {
 });
 
 // > button: cycles pages or collapses expanded card
-const pageOrder = ['projects', 'about', 'archive'];
+const pageOrder = ['projects', 'archive'];
 const nextBtn = document.querySelector('.menu-next');
 if (nextBtn) {
     nextBtn.addEventListener('click', () => {
@@ -227,6 +227,34 @@ const projectCards = feed ? [...feed.querySelectorAll('.project-card')] : [];
 const gifDecodeCache = new Map();
 let gifuctModulePromise = null;
 let apngModulePromise = null;
+
+function markProjectDetailImageLoading(img) {
+    if (!img || img.classList.contains('hover-img-preview')) return;
+    img.classList.remove('project-detail-image-loaded');
+    img.classList.add('project-detail-image-loading');
+}
+
+function markProjectDetailImageLoaded(img) {
+    if (!img || img.classList.contains('hover-img-preview')) return;
+    img.classList.remove('project-detail-image-loading');
+    img.classList.add('project-detail-image-loaded');
+}
+
+function finishProjectDetailImageLoad(img) {
+    window.setTimeout(() => markProjectDetailImageLoaded(img), 120);
+}
+
+projectCards.forEach(card => {
+    card.querySelectorAll('.card-detail img:not(.hover-img-preview)').forEach(img => {
+        if (img.complete && img.naturalWidth > 0) {
+            markProjectDetailImageLoaded(img);
+            return;
+        }
+        markProjectDetailImageLoading(img);
+        img.addEventListener('load', () => finishProjectDetailImageLoad(img));
+        img.addEventListener('error', () => finishProjectDetailImageLoad(img));
+    });
+});
 
 function isGifImage(img) {
     return /\.gif(?:$|[?#])/i.test(img.currentSrc || img.src || '');
@@ -512,7 +540,8 @@ function layoutProjects() {
     // Force reflow so image size changes are committed before we measure card widths
     feed.getBoundingClientRect();
 
-    let top = vh * 0.5 + 120;
+    const hasHomeAbout = document.querySelector('.home-about');
+    let top = hasHomeAbout ? 120 : vh * 0.5 + 120;
 
     projectCards.forEach((card, i) => {
         // Don't reposition the expanded card — it manages its own position
@@ -612,7 +641,9 @@ projectCards.forEach(card => {
         }
     }
 
-    if (window.innerWidth < 768 && 'IntersectionObserver' in window) {
+    if (document.querySelector('.home-about') && window.innerWidth >= 768) {
+        window.setTimeout(loadPreviewGif, 950);
+    } else if (window.innerWidth < 768 && 'IntersectionObserver' in window) {
         const observer = new IntersectionObserver(entries => {
             if (!entries.some(entry => entry.isIntersecting)) return;
             observer.disconnect();
@@ -659,11 +690,12 @@ window.addEventListener('resize', () => {
             const menuBarEl2 = document.querySelector('.menu-bar');
             const menuBarH2  = menuBarEl2.offsetHeight;
             const topPad2    = 28;
-            // Compute absolute top from feed rect so it stays just below the menu bar
-            // regardless of current scroll position
+            const menuTop2   = (isMobile2 && menuBarEl2.classList.contains('home-lower')) ? 63 : 28;
+            // Compute top relative to the projects feed so the absolute card stays
+            // visually just below the fixed menu bar regardless of page scroll.
             const feedTop2  = feed.getBoundingClientRect().top + window.scrollY;
-            const absTop2   = feedTop2 - feed.getBoundingClientRect().top +
-                              (topPad2 + menuBarH2 + topPad2) + window.scrollY;
+            const targetY2  = menuTop2 + menuBarH2 + topPad2;
+            const absTop2   = targetY2 + window.scrollY - feedTop2;
             const img       = card.querySelector('img');
 
             // Freeze the expanded card's transitions during resize too
@@ -671,7 +703,7 @@ window.addEventListener('resize', () => {
             img.style.transition  = 'none';
 
             card.style.left  = targetX2 + 'px';
-            card.style.top   = (topPad2 + menuBarH2 + topPad2) + window.scrollY + 'px';
+            card.style.top   = absTop2 + 'px';
             card.style.width = targetW2 + 'px';
 
             if (isVertical && !isMobile2) {
@@ -791,7 +823,112 @@ function animatePixelation(card, direction) {
     card._pixelRaf = requestAnimationFrame(frame);
 }
 
+function drawAboutPixelFrame(section, canvas, pixelSize) {
+    const w = section.offsetWidth;
+    const h = section.offsetHeight;
+    if (w === 0 || h === 0) return;
+
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    canvas.width = Math.max(1, Math.floor(w / pixelSize));
+    canvas.height = Math.max(1, Math.floor(h / pixelSize));
+
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.scale(1 / pixelSize, 1 / pixelSize);
+
+    const sectionRect = section.getBoundingClientRect();
+    const aboutCard = section.querySelector('.about-card');
+    const portrait = aboutCard ? aboutCard.querySelector('img') : null;
+    if (aboutCard && portrait) {
+        const cardRect = aboutCard.getBoundingClientRect();
+        const imgRect = portrait.getBoundingClientRect();
+        const cardStyle = getComputedStyle(aboutCard);
+        const borderW = parseFloat(cardStyle.borderTopWidth) || 1.8;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(cardRect.left - sectionRect.left, cardRect.top - sectionRect.top, cardRect.width, cardRect.height);
+        try {
+            ctx.drawImage(portrait, imgRect.left - sectionRect.left, imgRect.top - sectionRect.top, imgRect.width, imgRect.height);
+        } catch (e) { /* keep text pixelation if image drawing is unavailable */ }
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = borderW;
+        ctx.strokeRect(
+            cardRect.left - sectionRect.left + borderW / 2,
+            cardRect.top - sectionRect.top + borderW / 2,
+            cardRect.width - borderW,
+            cardRect.height - borderW
+        );
+    }
+
+    const textEls = [section.querySelector('.about-greeting'), ...section.querySelectorAll('.about-text p')].filter(Boolean);
+    textEls.forEach(el => {
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        ctx.fillStyle = style.color;
+        ctx.textAlign = style.textAlign === 'center' ? 'center' : 'left';
+        ctx.textBaseline = 'top';
+        if ('letterSpacing' in ctx) ctx.letterSpacing = style.letterSpacing;
+        const x = ctx.textAlign === 'center'
+            ? rect.left - sectionRect.left + rect.width / 2
+            : rect.left - sectionRect.left;
+        ctx.fillText(el.textContent, x, rect.top - sectionRect.top);
+    });
+
+    ctx.restore();
+}
+
+function animateAboutPixelation(direction) {
+    const section = document.querySelector('.home-about');
+    if (!section) return;
+    if (section._pixelRaf) { cancelAnimationFrame(section._pixelRaf); section._pixelRaf = null; }
+
+    let canvas = section._pixelCanvas;
+    if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.className = 'about-pixel-canvas';
+        section.appendChild(canvas);
+        section._pixelCanvas = canvas;
+    }
+
+    const MAX_PIXEL = 20;
+    const start = performance.now();
+    function frame(now) {
+        const t = Math.min((now - start) / PIXELATE_DURATION, 1);
+        const eased = pixelEase(direction === 'in' ? t : 1 - t);
+        const pxSize = Math.max(1, Math.round(MAX_PIXEL * eased));
+        if (pxSize > 1 || direction === 'out') {
+            section.classList.add('about-pixelated');
+            canvas.style.display = 'block';
+            drawAboutPixelFrame(section, canvas, pxSize);
+        }
+        if (t < 1) {
+            section._pixelRaf = requestAnimationFrame(frame);
+        } else {
+            section._pixelRaf = null;
+            if (direction === 'out') {
+                section.classList.remove('about-pixelated');
+                canvas.style.display = 'none';
+            }
+        }
+    }
+    section._pixelRaf = requestAnimationFrame(frame);
+}
+
 const GLITCH_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_/+-.';
+
+function runAfterFontsAndPaint(callback) {
+    const fontsReady = document.fonts && document.fonts.ready
+        ? document.fonts.ready.catch(() => {})
+        : Promise.resolve();
+    fontsReady.then(() => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(callback);
+        });
+    });
+}
 
 function glitchReveal(el, duration) {
     // Always resolve to the canonical text, not a mid-glitch snapshot
@@ -1172,6 +1309,7 @@ function expandCard(card) {
     expandedCard = card;
 
     projectCards.forEach(c => { if (c !== card) animatePixelation(c, 'in'); });
+    animateAboutPixelation('in');
     projectCards.forEach(c => { if (c !== card) c.classList.add('bg-faded'); });
     hoverLabel.classList.remove('visible');
     hoverLabel.textContent = '';
@@ -1210,7 +1348,8 @@ function expandCard(card) {
     const menuBarEl = document.querySelector('.menu-bar');
     const menuBarH  = menuBarEl.offsetHeight;
     const topPad    = 28;
-    const targetY   = topPad + menuBarH + topPad;
+    const menuTop   = (isMobile && menuBarEl.classList.contains('home-lower')) ? 63 : 28;
+    const targetY   = menuTop + menuBarH + topPad;
 
 
     // Freeze, snap to fixed at current position
@@ -1252,7 +1391,8 @@ function expandCard(card) {
         window.clearTimeout(expandFallbackTimer);
 
         const isMobileNow = window.innerWidth < 768;
-        const absTop = targetY + window.scrollY;
+        const feedTop = feed.getBoundingClientRect().top + window.scrollY;
+        const absTop = targetY + window.scrollY - feedTop;
         card.style.transition = 'none';
         card.style.position   = 'absolute';
         card.style.top        = absTop + 'px';
@@ -1360,6 +1500,7 @@ function collapseCard() {
     function doCollapse() {
         // Start depixelating background cards in sync with the collapse animation
         projectCards.forEach(c => { if (c !== card) animatePixelation(c, 'out'); });
+        animateAboutPixelation('out');
         projectCards.forEach(c => { if (c !== card) c.classList.remove('bg-faded'); });
 
         // Update menu bar in sync with the card animation start
@@ -1496,6 +1637,7 @@ function collapseCard() {
             });
             layoutProjects();
             updateMobileHoverLabel();
+            if (window.updateHomeMenuPosition) window.updateHomeMenuPosition();
             requestAnimationFrame(() => {
                 projectCards.forEach(c => {
                     c.style.transition = '';
@@ -1688,7 +1830,6 @@ projectCards.forEach(card => {
 
     const ITEM_W        = 300;
     const ITEM_W_MOBILE = 200; // px on mobile
-    const TOP_OFFSET    = 160;  // px from top before items start (desktop)
     const COL_GAP       = 24;   // horizontal gap between columns
     const ROW_GAP       = 24;   // vertical gap between items
 
@@ -1707,10 +1848,11 @@ projectCards.forEach(card => {
 
     function layoutArchive() {
         const vw       = window.innerWidth;
-        const vh       = window.innerHeight;
         const isMobile = vw < 768;
         const itemW    = isMobile ? ITEM_W_MOBILE : ITEM_W;
-        const topStart = isMobile ? Math.round(vh * 0.5 + 120) : TOP_OFFSET;
+        const menuBar  = document.querySelector('.menu-bar');
+        const menuRect = menuBar ? menuBar.getBoundingClientRect() : { bottom: 92 };
+        const topStart = Math.round(menuRect.bottom + 28);
 
         // Determine usable horizontal range
         const edgeGap = 80;
@@ -1800,18 +1942,6 @@ projectCards.forEach(card => {
     layoutArchive();
     window.addEventListener('resize', onResize);
 
-    // Move menu bar to top on first scroll, mouse move, or touch — just like opening a card
-    const menuBar = document.querySelector('.menu-bar');
-    function activateArchiveMenu() {
-        if (menuBar) menuBar.classList.add('archive-open');
-        window.removeEventListener('scroll',     activateArchiveMenu, { passive: true });
-        window.removeEventListener('mousemove',  activateArchiveMenu);
-        window.removeEventListener('touchstart', activateArchiveMenu, { passive: true });
-    }
-    window.addEventListener('scroll',     activateArchiveMenu, { passive: true });
-    window.addEventListener('mousemove',  activateArchiveMenu);
-    window.addEventListener('touchstart', activateArchiveMenu, { passive: true });
-
     // Re-layout once each image finishes loading in case it was unloaded on first pass
     archiveItems.forEach(item => {
         const img = item.querySelector('img');
@@ -1835,28 +1965,68 @@ projectCards.forEach(card => {
     }
 }());
 
-// ── About page init ────────────────────────────────────────────────────────
+// ── Home about/projects nav position ──────────────────────────────────────
 (function () {
-    if (document.body.dataset.page !== 'about') return;
-    const aboutText    = document.querySelector('.about-text');
-    const aboutFooter  = document.querySelector('.about-footer');
-    const greeting     = document.querySelector('.about-greeting');
+    if (document.body.dataset.page !== 'projects') return;
+    const menuBar = document.querySelector('.menu-bar.home-lower');
+    const aboutSection = document.querySelector('.home-about');
+    const greeting = document.querySelector('.home-about .about-greeting');
+    const aboutText = document.querySelector('.home-about .about-text');
+    const aboutArrow = document.querySelector('.home-about .about-scroll-arrow');
+    if (!menuBar || !aboutSection) return;
 
-    // Glitch reveal on load
-    if (greeting) glitchReveal(greeting, 650);
+    if (greeting) runAfterFontsAndPaint(() => glitchReveal(greeting, 650));
 
-    const menuBar = document.querySelector('.menu-bar');
-    if (!menuBar) return;
-
-    function syncWidths() {
-        // Menu bar text sits 1.5em inside each edge — match that inner width
+    function syncAboutWidth() {
+        if (!aboutText) return;
         const menuFontSize = parseFloat(getComputedStyle(menuBar).fontSize);
         const innerW = menuBar.offsetWidth - 2 * menuFontSize * 1.5;
-        if (aboutText)   aboutText.style.maxWidth = Math.round(innerW) + 'px';
-        if (aboutFooter) aboutFooter.style.width  = '';
+        aboutText.style.maxWidth = Math.round(innerW) + 'px';
     }
 
-    syncWidths();
-    window.addEventListener('resize', syncWidths);
-    document.fonts.ready.then(syncWidths);
+    function syncAboutArrowHeight() {
+        if (!aboutArrow || !aboutText) return;
+        const textRect = aboutText.getBoundingClientRect();
+        const menuRect = menuBar.getBoundingClientRect();
+        const arrowTopGap = 24;
+        const arrowBottomGap = 18;
+        const available = menuRect.top - textRect.bottom - arrowTopGap - arrowBottomGap;
+        aboutArrow.style.setProperty('--about-arrow-height', Math.max(28, Math.round(available)) + 'px');
+    }
+
+    function updateHomeMenuPosition() {
+        if (expandedCard || isCollapsing) {
+            menuBar.classList.add('home-top');
+            return;
+        }
+        const threshold = aboutSection.offsetTop + aboutSection.offsetHeight * 0.45;
+        menuBar.classList.toggle('home-top', window.scrollY >= threshold);
+    }
+
+    function hideAboutArrow() {
+        if (aboutArrow) aboutArrow.classList.add('is-hidden');
+    }
+
+    window.updateHomeMenuPosition = updateHomeMenuPosition;
+
+    syncAboutWidth();
+    syncAboutArrowHeight();
+    updateHomeMenuPosition();
+    window.addEventListener('scroll', updateHomeMenuPosition, { passive: true });
+    window.addEventListener('scroll', hideAboutArrow, { passive: true, once: true });
+    window.addEventListener('resize', () => {
+        syncAboutWidth();
+        syncAboutArrowHeight();
+        updateHomeMenuPosition();
+    });
+    document.fonts.ready.then(() => {
+        syncAboutWidth();
+        syncAboutArrowHeight();
+        updateHomeMenuPosition();
+    });
+    window.addEventListener('load', () => {
+        syncAboutWidth();
+        syncAboutArrowHeight();
+        updateHomeMenuPosition();
+    });
 }());
