@@ -696,6 +696,8 @@ window.addEventListener('resize', () => {
             const feedTop2  = feed.getBoundingClientRect().top + window.scrollY;
             const targetY2  = menuTop2 + menuBarH2 + topPad2;
             const absTop2   = targetY2 + window.scrollY - feedTop2;
+            const currentAbsTop2 = parseFloat(card.style.top);
+            const preserveMobileScrollTop = isMobile2 && card.style.position === 'absolute' && Number.isFinite(currentAbsTop2);
             const img       = card.querySelector('img');
 
             // Freeze the expanded card's transitions during resize too
@@ -703,7 +705,7 @@ window.addEventListener('resize', () => {
             img.style.transition  = 'none';
 
             card.style.left  = targetX2 + 'px';
-            card.style.top   = absTop2 + 'px';
+            card.style.top   = (preserveMobileScrollTop ? currentAbsTop2 : absTop2) + 'px';
             card.style.width = targetW2 + 'px';
 
             if (isVertical && !isMobile2) {
@@ -1688,6 +1690,7 @@ if (returnNav) {
 
 projectCards.forEach(card => {
     let mouseDownX, mouseDownY;
+    let touchStartScrollY = 0;
     let recentTouch = false; // suppress synthetic mouse events after touch
 
     card.addEventListener('mousedown', e => {
@@ -1713,12 +1716,18 @@ projectCards.forEach(card => {
         const t     = e.touches[0];
         mouseDownX  = t.clientX;
         mouseDownY  = t.clientY;
+        touchStartScrollY = window.scrollY;
     }, { passive: true });
 
     card.addEventListener('touchend', e => {
         setTimeout(() => { recentTouch = false; }, 500);
         const t     = e.changedTouches[0];
         const moved = Math.abs(t.clientX - mouseDownX) + Math.abs(t.clientY - mouseDownY);
+        const scrolled = Math.abs(window.scrollY - touchStartScrollY) > 2;
+        if (scrolled || moved >= 10) {
+            ignoreNextWindowClick = true;
+            return;
+        }
         if (moved < 10 && !expandedCard) {
             ignoreNextWindowClick = true;
             expandCard(card);
