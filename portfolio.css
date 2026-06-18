@@ -684,7 +684,7 @@ html {
     }
 
     .return-nav {
-        top: 28px;
+        top: 63px;
         width: 2.65em;
         height: 2.65em;
         border-radius: 50%;
@@ -813,6 +813,7 @@ html {
     position: relative;
     min-height: 100vh;
     padding-bottom: 104px;
+    box-sizing: border-box;
 }
 
 .home-about.about-pixelated > :not(.about-pixel-canvas) {

@@ -491,6 +491,30 @@ const returnNav = document.querySelector('.return-nav');
 let returnNavTimer = null;
 const collapsedState = new Map();
 
+function getCollapsedFeedHeight() {
+    if (!projectCards.length) return 0;
+
+    const isMobile = window.innerWidth < 768;
+    const bottomPad = isMobile ? window.innerHeight * 0.5 + 120 : 120;
+    let bottom = 0;
+
+    projectCards.forEach(card => {
+        const saved = collapsedState.get(card);
+        const top = saved ? parseFloat(saved.top) : parseFloat(card.style.top);
+        const height = saved ? saved.cardOffsetH : card.offsetHeight;
+        if (!Number.isFinite(top) || !Number.isFinite(height)) return;
+        bottom = Math.max(bottom, top + height);
+    });
+
+    return bottom + bottomPad;
+}
+
+function resetCollapsedFeedHeight() {
+    if (!feed) return;
+    const height = getCollapsedFeedHeight();
+    if (height > 0) feed.style.height = height + 'px';
+}
+
 function showReturnNavAfterMenuFade() {
     if (!returnNav) return;
     window.clearTimeout(returnNavTimer);
@@ -683,7 +707,7 @@ window.addEventListener('resize', () => {
             const isVertical = card.classList.contains('vertical');
             const vw2        = window.innerWidth;
             const isMobile2  = vw2 < 768;
-            const sidePad2   = (!isMobile2 && !isVertical) ? vw2 * 0.10 : vw2 * 0.05;
+            const sidePad2   = isMobile2 ? vw2 * 0.05 : vw2 * 0.10;
             const cardPad2   = 10;
             const targetW2   = vw2 - sidePad2 * 2;
             const targetX2   = sidePad2;
@@ -1343,7 +1367,7 @@ function expandCard(card) {
 
     const vw        = window.innerWidth;
     const isMobile  = vw < 768;
-    const sidePad   = (!isMobile && !isVertical) ? vw * 0.10 : vw * 0.05;
+    const sidePad   = isMobile ? vw * 0.05 : vw * 0.10;
     const cardPad   = 10;
     const targetW   = vw - sidePad * 2;
     const targetX   = sidePad;
@@ -1581,13 +1605,7 @@ function collapseCard() {
             detail.style.display = 'none';
             if (titleEl) titleEl.style.fontSize = '';
         }
-        const lastCard = projectCards[projectCards.length - 1];
-        if (lastCard) {
-            const ls = collapsedState.get(lastCard);
-            const lastTop = ls ? parseFloat(ls.top) : parseFloat(lastCard.style.top);
-            const lastH   = ls ? ls.cardOffsetH : lastCard.offsetHeight;
-            feed.style.height = (lastTop + lastH + 120) + 'px';
-        }
+        resetCollapsedFeedHeight();
 
         // --- Step 4: restore feed height to collapsed size so the page behind
         //     doesn't extend past its normal bounds while the card animates out ---
@@ -1638,6 +1656,7 @@ function collapseCard() {
                 const ci = c.querySelector('img'); if (ci) ci.style.transition = 'none';
             });
             layoutProjects();
+            requestAnimationFrame(() => requestAnimationFrame(layoutProjects));
             updateMobileHoverLabel();
             if (window.updateHomeMenuPosition) window.updateHomeMenuPosition();
             requestAnimationFrame(() => {
