@@ -549,27 +549,36 @@ function guardMobileScrollAgainstTopReset(duration = 2400) {
     requestAnimationFrame(frame);
 }
 
-function getCollapsedFeedHeight() {
-    if (!projectCards.length) return 0;
-
+function getCollapsedLayoutSnapshot(currentCard = null, currentSaved = null) {
     const isMobile = window.innerWidth < 768;
-    const bottomPad = isMobile ? window.innerHeight * 0.5 + 120 : 120;
-    let bottom = 0;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const bottomPad = isMobile ? vh * 0.5 + 120 : 120;
+    const positions = new Map();
+    let top = document.querySelector('.home-about') ? 120 : vh * 0.5 + 120;
 
     projectCards.forEach(card => {
-        const saved = collapsedState.get(card);
-        const top = saved ? parseFloat(saved.top) : parseFloat(card.style.top);
+        const saved = card === currentCard ? currentSaved : null;
+        const width = saved ? saved.cardOffsetW : card.offsetWidth;
         const height = saved ? saved.cardOffsetH : card.offsetHeight;
-        if (!Number.isFinite(top) || !Number.isFinite(height)) return;
-        bottom = Math.max(bottom, top + height);
+        const left = Number.isFinite(width) ? Math.round((vw - width) / 2) : parseFloat(card.style.left) || 0;
+        positions.set(card, { left, top: Math.round(top), height });
+        top += height + CARD_GAP;
     });
 
-    return bottom + bottomPad;
+    const last = projectCards[projectCards.length - 1];
+    const lastPosition = last ? positions.get(last) : null;
+    const height = lastPosition ? lastPosition.top + lastPosition.height + bottomPad : 0;
+    return { positions, height };
 }
 
-function resetCollapsedFeedHeight() {
+function getCollapsedFeedHeight() {
+    return getCollapsedLayoutSnapshot().height;
+}
+
+function resetCollapsedFeedHeight(snapshot = getCollapsedLayoutSnapshot()) {
     if (!feed) return;
-    const height = getCollapsedFeedHeight();
+    const height = snapshot.height;
     if (height > 0) feed.style.height = height + 'px';
 }
 
@@ -1413,6 +1422,7 @@ function expandCard(card) {
     const savedCardH    = card.offsetHeight;
     const currentRect   = card.getBoundingClientRect();
 
+    collapsedState.clear();
     collapsedState.set(card, {
         left:        savedLeft,
         top:         savedTop,
@@ -1670,14 +1680,16 @@ function collapseCard() {
             detail.style.display = 'none';
             if (titleEl) titleEl.style.fontSize = '';
         }
-        resetCollapsedFeedHeight();
+        const collapsedSnapshot = getCollapsedLayoutSnapshot(card, saved);
+        resetCollapsedFeedHeight(collapsedSnapshot);
         guardMobileScrollAgainstTopReset(900);
 
         // --- Step 4: restore feed height to collapsed size so the page behind
         //     doesn't extend past its normal bounds while the card animates out ---
         const feedRect        = feed.getBoundingClientRect();
-        const targetFixedLeft = feedRect.left + parseFloat(saved.left);
-        const targetFixedTop  = feedRect.top  + parseFloat(saved.top);
+        const targetPosition  = collapsedSnapshot.positions.get(card) || { left: parseFloat(saved.left), top: parseFloat(saved.top) };
+        const targetFixedLeft = feedRect.left + targetPosition.left;
+        const targetFixedTop  = feedRect.top  + targetPosition.top;
         const targetH         = saved.cardOffsetH; // collapsed card height
 
         // --- Step 5: force reflow so height lock is registered, then enable transitions ---
@@ -1706,13 +1718,14 @@ function collapseCard() {
             img.style.transition  = 'none';
             card.classList.remove('expanded');
             card.style.position   = 'absolute';
-            card.style.left       = saved.left;
-            card.style.top        = saved.top;
+            card.style.left       = targetPosition.left + 'px';
+            card.style.top        = targetPosition.top + 'px';
             card.style.width      = '';
             card.style.height     = '';
             card.style.zIndex     = ++dragZ;
             img.style.width       = saved.imgWidth;
             img.style.height      = saved.imgHeight;
+            collapsedState.delete(card);
             syncGifCanvas(img);
             card.getBoundingClientRect();
             card.style.transition = '';
@@ -1722,7 +1735,11 @@ function collapseCard() {
                 const ci = c.querySelector('img'); if (ci) ci.style.transition = 'none';
             });
             layoutProjects();
-            requestAnimationFrame(() => requestAnimationFrame(layoutProjects));
+            resetCollapsedFeedHeight();
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                layoutProjects();
+                resetCollapsedFeedHeight();
+            }));
             updateMobileHoverLabel();
             if (window.updateHomeMenuPosition) window.updateHomeMenuPosition();
             requestAnimationFrame(() => {
