@@ -266,6 +266,11 @@ main,
     z-index: 100;
 }
 
+.project-card.mobile-fixed-expanded {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
 .project-card.vertical.expanded {
     align-items: flex-start;
 }

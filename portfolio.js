@@ -533,6 +533,7 @@ function guardMobileScrollAgainstTopReset(duration = 2400) {
 
     function frame() {
         if (token !== mobileScrollGuardToken || !expandedCard || !isMobileViewport()) return;
+        if (expandedCard.classList.contains('mobile-fixed-expanded')) return;
         const recentUserScrollInput = performance.now() - lastUserScrollInputAt < 250;
 
         if (recentUserScrollInput) {
@@ -547,6 +548,24 @@ function guardMobileScrollAgainstTopReset(duration = 2400) {
     }
 
     requestAnimationFrame(frame);
+}
+
+function setMobileExpandedViewport(card, top, resetScroll = false) {
+    if (!card || !isMobileViewport()) return;
+    const bottomPad = 16;
+    card.classList.add('mobile-fixed-expanded');
+    card.style.maxHeight = Math.max(160, window.innerHeight - top - bottomPad) + 'px';
+    card.style.overflowY = 'auto';
+    card.style.WebkitOverflowScrolling = 'touch';
+    if (resetScroll) card.scrollTop = 0;
+}
+
+function clearMobileExpandedViewport(card) {
+    if (!card) return;
+    card.classList.remove('mobile-fixed-expanded');
+    card.style.maxHeight = '';
+    card.style.overflowY = '';
+    card.style.WebkitOverflowScrolling = '';
 }
 
 function getCollapsedLayoutSnapshot(currentCard = null, currentSaved = null) {
@@ -754,7 +773,11 @@ window.addEventListener('resize', () => {
     if (rafPending) return;
     const nextViewportWidth = window.innerWidth;
     const widthChanged = Math.abs(nextViewportWidth - lastProjectViewportWidth) > 1;
-    if (expandedCard && nextViewportWidth < 768 && !widthChanged) return;
+    if (expandedCard && nextViewportWidth < 768 && !widthChanged) {
+        const currentTop = parseFloat(expandedCard.style.top) || 92;
+        setMobileExpandedViewport(expandedCard, currentTop);
+        return;
+    }
     lastProjectViewportWidth = nextViewportWidth;
     rafPending = true;
     requestAnimationFrame(() => {
@@ -1477,7 +1500,7 @@ function expandCard(card) {
     }
     // Vertical on desktop: image keeps its natural size; detail fills flex row beside it
 
-    // After animation settle: switch fixed→absolute, clear img height lock, show detail
+    // After animation settle: desktop switches fixed→absolute; mobile stays fixed with internal scroll
     let expandSettled = false;
     function finishExpand() {
         if (expandSettled || expandedCard !== card) return;
@@ -1490,8 +1513,15 @@ function expandCard(card) {
         const absTop = targetY + window.scrollY - feedTop;
         preserveMobileScrollPosition(() => {
             card.style.transition = 'none';
-            card.style.position   = 'absolute';
-            card.style.top        = absTop + 'px';
+            if (isMobileNow) {
+                card.style.position = 'fixed';
+                card.style.top = targetY + 'px';
+                setMobileExpandedViewport(card, targetY, true);
+            } else {
+                card.style.position = 'absolute';
+                card.style.top = absTop + 'px';
+                clearMobileExpandedViewport(card);
+            }
             img.style.transition  = 'none';
             img.style.height = 'auto';
             syncGifCanvas(img);
@@ -1529,9 +1559,11 @@ function expandCard(card) {
                 if (expandedCard !== card || isCollapsing) return;
                 card.style.transition = '';
                 card.style.height     = '';
-                const cardBottom = absTop + card.offsetHeight;
-                if (cardBottom + 120 > parseFloat(feed.style.height) || 0) {
-                    feed.style.height = (cardBottom + 120) + 'px';
+                if (!isMobileNow) {
+                    const cardBottom = absTop + card.offsetHeight;
+                    if (cardBottom + 120 > parseFloat(feed.style.height) || 0) {
+                        feed.style.height = (cardBottom + 120) + 'px';
+                    }
                 }
                 detail.getBoundingClientRect();
                 detail.classList.add('visible');
@@ -1545,18 +1577,20 @@ function expandCard(card) {
                         v.src = v.dataset.vimeoSrc;
                     }
                 });
-                guardMobileScrollAgainstTopReset();
                 sizeDetailVideos(card, detail, isMobileNow);
+                if (isMobileNow) setMobileExpandedViewport(card, targetY);
                 card.style.height = '';  // ensure card auto-sizes to new video heights
                 if (card.dataset.title === 'SCI_AM' && !isMobileNow) {
                     const pair = detail.querySelector('.card-video-pair');
                     if (pair) pair.style.marginBottom = '40px';
                 }
-                // Recalculate feed height now that videos are sized
-                const cardBottomFinal = absTop + card.offsetHeight;
-                preserveMobileScrollPosition(() => {
-                    feed.style.height = (cardBottomFinal + 240) + 'px';
-                });
+                if (!isMobileNow) {
+                    // Recalculate feed height now that videos are sized
+                    const cardBottomFinal = absTop + card.offsetHeight;
+                    preserveMobileScrollPosition(() => {
+                        feed.style.height = (cardBottomFinal + 240) + 'px';
+                    });
+                }
 
                 // Freeze preview image on the frame currently showing
                 freezeCardImage(card);
@@ -1630,6 +1664,7 @@ function collapseCard() {
         const liveImgH = img.offsetHeight;
 
         // --- Step 2: snap to fixed at exact current position (decouples from scroll) ---
+        clearMobileExpandedViewport(card);
         card.style.position = 'fixed';
         card.style.left     = liveRect.left   + 'px';
         card.style.top      = liveRect.top    + 'px';
@@ -1689,7 +1724,7 @@ function collapseCard() {
         const feedRect        = feed.getBoundingClientRect();
         const targetPosition  = collapsedSnapshot.positions.get(card) || { left: parseFloat(saved.left), top: parseFloat(saved.top) };
         const targetFixedLeft = feedRect.left + targetPosition.left;
-        const targetFixedTop  = feedRect.top  + targetPosition.top;
+        const targetFixedTop  = feedRect.top + targetPosition.top;
         const targetH         = saved.cardOffsetH; // collapsed card height
 
         // --- Step 5: force reflow so height lock is registered, then enable transitions ---
