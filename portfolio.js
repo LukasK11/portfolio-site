@@ -490,6 +490,64 @@ let isCollapsing = false;
 const returnNav = document.querySelector('.return-nav');
 let returnNavTimer = null;
 const collapsedState = new Map();
+let lastUserScrollInputAt = 0;
+let mobileScrollGuardToken = 0;
+
+['touchstart', 'touchmove', 'wheel'].forEach(eventName => {
+    window.addEventListener(eventName, () => {
+        lastUserScrollInputAt = performance.now();
+    }, { passive: true });
+});
+
+function isMobileViewport() {
+    return window.innerWidth < 768;
+}
+
+function preserveMobileScrollPosition(callback) {
+    const shouldPreserve = isMobileViewport();
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+
+    callback();
+
+    if (!shouldPreserve) return;
+
+    function restoreIfLayoutMovedScroll() {
+        if (performance.now() - lastUserScrollInputAt < 250) return;
+        if (Math.abs(window.scrollX - scrollX) > 1 || Math.abs(window.scrollY - scrollY) > 1) {
+            window.scrollTo(scrollX, scrollY);
+        }
+    }
+
+    requestAnimationFrame(() => {
+        restoreIfLayoutMovedScroll();
+        requestAnimationFrame(restoreIfLayoutMovedScroll);
+    });
+}
+
+function guardMobileScrollAgainstTopReset(duration = 2400) {
+    if (!isMobileViewport()) return;
+    const token = ++mobileScrollGuardToken;
+    const endAt = performance.now() + duration;
+    let expectedScrollY = window.scrollY;
+
+    function frame() {
+        if (token !== mobileScrollGuardToken || !expandedCard || !isMobileViewport()) return;
+        const recentUserScrollInput = performance.now() - lastUserScrollInputAt < 250;
+
+        if (recentUserScrollInput) {
+            expectedScrollY = window.scrollY;
+        } else if (window.scrollY <= 1 && expectedScrollY > 1) {
+            window.scrollTo(window.scrollX, expectedScrollY);
+        } else {
+            expectedScrollY = window.scrollY;
+        }
+
+        if (performance.now() < endAt) requestAnimationFrame(frame);
+    }
+
+    requestAnimationFrame(frame);
+}
 
 function getCollapsedFeedHeight() {
     if (!projectCards.length) return 0;
@@ -1333,6 +1391,7 @@ function sizeDetailVideos(card, detail, isMobile) {
 function expandCard(card) {
     if (expandedCard || isCollapsing) return;
     expandedCard = card;
+    guardMobileScrollAgainstTopReset();
 
     projectCards.forEach(c => { if (c !== card) animatePixelation(c, 'in'); });
     animateAboutPixelation('in');
@@ -1419,21 +1478,23 @@ function expandCard(card) {
         const isMobileNow = window.innerWidth < 768;
         const feedTop = feed.getBoundingClientRect().top + window.scrollY;
         const absTop = targetY + window.scrollY - feedTop;
-        card.style.transition = 'none';
-        card.style.position   = 'absolute';
-        card.style.top        = absTop + 'px';
-        img.style.transition  = 'none';
-        img.style.height = 'auto';
-        syncGifCanvas(img);
-
-        if (isMobileNow) {
-            // On mobile all cards are column layout — image fills full card width
-            img.style.width = (targetW - cardPad - 3.6) + 'px';
+        preserveMobileScrollPosition(() => {
+            card.style.transition = 'none';
+            card.style.position   = 'absolute';
+            card.style.top        = absTop + 'px';
+            img.style.transition  = 'none';
+            img.style.height = 'auto';
             syncGifCanvas(img);
-        } else if (isVertical) {
-            // Desktop vertical: image keeps natural size, detail sits beside it
-            // Width was never set during animation so just clear height lock
-        }
+
+            if (isMobileNow) {
+                // On mobile all cards are column layout — image fills full card width
+                img.style.width = (targetW - cardPad - 3.6) + 'px';
+                syncGifCanvas(img);
+            } else if (isVertical) {
+                // Desktop vertical: image keeps natural size, detail sits beside it
+                // Width was never set during animation so just clear height lock
+            }
+        });
         // Force reflow so dimensions are settled before we measure
         card.getBoundingClientRect();
         card.style.transition = '';
@@ -1455,6 +1516,7 @@ function expandCard(card) {
             card.style.transition = 'height 0.45s cubic-bezier(0.76, 0, 0.24, 1)';
             card.style.height     = afterH  + 'px';
             setTimeout(() => {
+                if (expandedCard !== card || isCollapsing) return;
                 card.style.transition = '';
                 card.style.height     = '';
                 const cardBottom = absTop + card.offsetHeight;
@@ -1473,6 +1535,7 @@ function expandCard(card) {
                         v.src = v.dataset.vimeoSrc;
                     }
                 });
+                guardMobileScrollAgainstTopReset();
                 sizeDetailVideos(card, detail, isMobileNow);
                 card.style.height = '';  // ensure card auto-sizes to new video heights
                 if (card.dataset.title === 'SCI_AM' && !isMobileNow) {
@@ -1481,7 +1544,9 @@ function expandCard(card) {
                 }
                 // Recalculate feed height now that videos are sized
                 const cardBottomFinal = absTop + card.offsetHeight;
-                feed.style.height = (cardBottomFinal + 240) + 'px';
+                preserveMobileScrollPosition(() => {
+                    feed.style.height = (cardBottomFinal + 240) + 'px';
+                });
 
                 // Freeze preview image on the frame currently showing
                 freezeCardImage(card);
@@ -1606,6 +1671,7 @@ function collapseCard() {
             if (titleEl) titleEl.style.fontSize = '';
         }
         resetCollapsedFeedHeight();
+        guardMobileScrollAgainstTopReset(900);
 
         // --- Step 4: restore feed height to collapsed size so the page behind
         //     doesn't extend past its normal bounds while the card animates out ---

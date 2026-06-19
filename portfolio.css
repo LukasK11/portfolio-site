@@ -39,6 +39,15 @@ body {
 
 html {
     overflow-x: clip;
+    overflow-anchor: none;
+}
+
+body,
+main,
+.home-about,
+.projects-feed,
+.project-card {
+    overflow-anchor: none;
 }
 
 #three-container {
